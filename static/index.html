@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>QuishGuard — QR Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap');
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --border: #1e1e2e;
+      --accent: #00e5a0;
+      --danger: #ff3e5e;
+      --warn: #ffb347;
+      --text: #e8e8f0;
+      --muted: #5a5a7a;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+      overflow-x: hidden;
+    }
+
+    /* grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: 0.4;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    header {
+      text-align: center;
+      padding: 12px 0 4px;
+    }
+
+    .logo {
+      font-family: 'Space Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--accent);
+    }
+
+    .logo span {
+      color: var(--text);
+    }
+
+    .tagline {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* camera box */
+    .camera-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    #overlay-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    /* scanning corners */
+    .corner {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border-color: var(--accent);
+      border-style: solid;
+      opacity: 0.7;
+    }
+    .corner.tl { top: 16px; left: 16px; border-width: 2px 0 0 2px; border-radius: 4px 0 0 0; }
+    .corner.tr { top: 16px; right: 16px; border-width: 2px 2px 0 0; border-radius: 0 4px 0 0; }
+    .corner.bl { bottom: 16px; left: 16px; border-width: 0 0 2px 2px; border-radius: 0 0 0 4px; }
+    .corner.br { bottom: 16px; right: 16px; border-width: 0 2px 2px 0; border-radius: 0 0 4px 0; }
+
+    /* scan line */
+    .scan-line {
+      position: absolute;
+      left: 16px; right: 16px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scan 2s ease-in-out infinite;
+      top: 16px;
+    }
+
+    @keyframes scan {
+      0%   { top: 16px; opacity: 1; }
+      90%  { top: calc(100% - 16px); opacity: 1; }
+      100% { top: calc(100% - 16px); opacity: 0; }
+    }
+
+    /* status badge */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--muted);
+      font-family: 'Space Mono', monospace;
+    }
+
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .dot.active { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 1.5s infinite; }
+    .dot.danger { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    #status-text { flex: 1; }
+
+    /* result card */
+    .result-card {
+      border-radius: 14px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-card.show { display: flex; }
+
+    .result-card.safe   { border-color: var(--accent); }
+    .result-card.danger { border-color: var(--danger); }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .verdict-icon {
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .verdict-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .verdict-label.safe   { color: var(--accent); }
+    .verdict-label.danger { color: var(--danger); }
+
+    .confidence-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .conf-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .conf-bar-bg {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .conf-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+      background: var(--accent);
+    }
+
+    .conf-bar-fill.danger { background: var(--danger); }
+
+    .url-preview {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      word-break: break-all;
+      background: var(--bg);
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .scan-again-btn {
+      margin-top: 4px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .scan-again-btn:hover {
+      border-color: var(--accent);
+      background: rgba(0,229,160,0.05);
+    }
+
+    /* heatmap section */
+    .heatmap-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .heatmap-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .heatmap-img {
+      width: 100%;
+      border-radius: 10px;
+      display: block;
+      animation: slideUp 0.4s ease 0.1s both;
+    }
+
+    /* URL breakdown panel */
+    .url-breakdown {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .url-breakdown.danger-bg { border-color: rgba(255,62,94,0.3); }
+    .breakdown-title {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .breakdown-flags { display: flex; flex-direction: column; gap: 5px; }
+    .flag-item {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 7px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .flag-item.safe-flag {
+      border-color: rgba(0,229,160,0.3);
+      color: var(--accent);
+    }
+    .pixel-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      padding-top: 4px;
+      border-top: 1px solid var(--border);
+    }
+
+    .zone-badge {
+      display: inline-block;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .zone-badge.danger {
+      color: var(--danger);
+      border-color: rgba(255,62,94,0.3);
+      background: rgba(255,62,94,0.07);
+    }
+
+    .heatmap-legend {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      color: var(--muted);
+      justify-content: flex-end;
+    }
+
+    .legend-bar {
+      width: 60px;
+      height: 6px;
+      border-radius: 3px;
+      background: linear-gradient(to right, #00f, #0ff, #0f0, #ff0, #f00);
+    }
+
+    /* connecting state */
+    .connecting {
+      text-align: center;
+      padding: 40px 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    footer {
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      padding-top: 4px;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo">Quish<span>Guard</span></div>
+    <div class="tagline">Real-time QR threat detection</div>
+  </header>
+
+  <div class="camera-wrap" id="camera-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay-canvas"></canvas>
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+    <div class="scan-line" id="scan-line"></div>
+  </div>
+
+  <div class="status-bar">
+    <div class="dot active" id="status-dot"></div>
+    <span id="status-text">Scanning for QR code...</span>
+  </div>
+
+  <div class="result-card" id="result-card">
+    <div class="result-header">
+      <div class="verdict-icon" id="verdict-icon"></div>
+      <div class="verdict-label" id="verdict-label"></div>
+    </div>
+    <div class="confidence-row">
+      <div class="conf-label">Confidence</div>
+      <div class="conf-bar-bg">
+        <div class="conf-bar-fill" id="conf-bar"></div>
+      </div>
+    </div>
+    <div class="url-preview" id="url-preview"></div>
+
+    <!-- heatmap section -->
+    <div class="heatmap-section" id="heatmap-section" style="display:none">
+      <div class="heatmap-header">
+        <div class="conf-label">Feature importance heatmap</div>
+        <div class="heatmap-legend">
+          <span>low</span>
+          <div class="legend-bar"></div>
+          <span>high</span>
+        </div>
+      </div>
+      <img class="heatmap-img" id="heatmap-img" src="" alt="Feature importance heatmap"/>
+      <div class="zone-badge" id="zone-badge"></div>
+    </div>
+
+    <!-- URL breakdown panel -->
+    <div class="url-breakdown" id="url-breakdown" style="display:none">
+      <div class="breakdown-title">⚠ Why this was flagged</div>
+      <div class="breakdown-flags" id="breakdown-flags"></div>
+      <div class="pixel-row">
+        <span>Pixel model confidence</span>
+        <span id="pixel-prob-text" style="font-family:var(--font-mono,monospace)"></span>
+      </div>
+    </div>
+
+    <button class="scan-again-btn" onclick="resetScan()">↩ Scan another QR code</button>
+  </div>
+
+  <footer>AI&DS · Batch 9 · 2025–26</footer>
+
+</div>
+
+<script>
+  // ── CONFIG: change this to your ngrok URL ──
+  const SERVER_URL = '';  // empty = same server (works on Cloud Run and locally)
+
+  const video      = document.getElementById('video');
+  const canvas     = document.getElementById('overlay-canvas');
+  const ctx        = canvas.getContext('2d');
+  const statusDot  = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+  const resultCard = document.getElementById('result-card');
+
+  let scanning    = true;
+  let lastScanned = '';
+  let scanCanvas  = document.createElement('canvas');
+  let scanCtx     = scanCanvas.getContext('2d');
+
+  // start camera
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 640 } }
+      });
+      video.srcObject = stream;
+      video.play();
+      video.addEventListener('loadedmetadata', () => {
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        scanCanvas.width  = video.videoWidth;
+        scanCanvas.height = video.videoHeight;
+        requestAnimationFrame(tick);
+      });
+    } catch (e) {
+      statusText.textContent = 'Camera access denied. Please allow camera.';
+      statusDot.className = 'dot danger';
+    }
+  }
+
+  // main scan loop
+  function tick() {
+    if (!scanning) return;
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+      const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: 'dontInvert'
+      });
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (code) {
+        drawBox(code.location);
+        const qrData = code.data;
+        if (qrData !== lastScanned) {
+          lastScanned = qrData;
+          scanning = false;
+          statusText.textContent = 'QR found! Checking...';
+          statusDot.className = 'dot active';
+          sendToServer(qrData, imageData);
+        }
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function drawBox(loc) {
+    ctx.beginPath();
+    ctx.moveTo(loc.topLeftCorner.x,     loc.topLeftCorner.y);
+    ctx.lineTo(loc.topRightCorner.x,    loc.topRightCorner.y);
+    ctx.lineTo(loc.bottomRightCorner.x, loc.bottomRightCorner.y);
+    ctx.lineTo(loc.bottomLeftCorner.x,  loc.bottomLeftCorner.y);
+    ctx.closePath();
+    ctx.strokeStyle = '#00e5a0';
+    ctx.lineWidth   = 3;
+    ctx.stroke();
+  }
+
+  async function sendToServer(qrText, imageData) {
+    // put imageData into a blob to send
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width  = scanCanvas.width;
+    tmpCanvas.height = scanCanvas.height;
+    tmpCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    tmpCanvas.toBlob(async (blob) => {
+      const form = new FormData();
+      form.append('image', blob, 'qr.png');
+      form.append('qr_text', qrText);
+
+      try {
+        const res  = await fetch(`${SERVER_URL}/predict`, { method: 'POST', body: form });
+        const data = await res.json();
+        showResult(data, qrText);
+      } catch (err) {
+        statusText.textContent = 'Could not reach server. Is Flask running?';
+        statusDot.className = 'dot danger';
+        scanning = true;
+        lastScanned = '';
+      }
+    }, 'image/png');
+  }
+
+  function showResult(data, qrText) {
+    const isSafe     = data.prediction === 'Safe';
+    const confidence = Math.round((data.confidence || 0.5) * 100);
+
+    document.getElementById('verdict-icon').textContent  = isSafe ? '✅' : '🚨';
+    document.getElementById('verdict-label').textContent = isSafe ? 'SAFE' : 'MALICIOUS';
+    document.getElementById('verdict-label').className   = 'verdict-label ' + (isSafe ? 'safe' : 'danger');
+    document.getElementById('url-preview').textContent   = qrText.length > 80 ? qrText.slice(0,80)+'…' : qrText;
+
+    const bar = document.getElementById('conf-bar');
+    bar.style.width = confidence + '%';
+    bar.className   = 'conf-bar-fill ' + (isSafe ? '' : 'danger');
+
+    // heatmap
+    if (data.heatmap) {
+      document.getElementById('heatmap-img').src = data.heatmap;
+      document.getElementById('heatmap-section').style.display = 'flex';
+      const zoneBadge = document.getElementById('zone-badge');
+      zoneBadge.textContent = '⚡ Most active: ' + (data.suspicious_zone || 'data region');
+      zoneBadge.className   = 'zone-badge ' + (isSafe ? '' : 'danger');
+    }
+
+    // URL breakdown panel
+    const breakdown     = document.getElementById('url-breakdown');
+    const flagsContainer = document.getElementById('breakdown-flags');
+    const pixelText     = document.getElementById('pixel-prob-text');
+
+    flagsContainer.innerHTML = '';
+    const flags = data.url_flags || [];
+
+    if (flags.length > 0) {
+      flags.forEach((flag, i) => {
+        const div = document.createElement('div');
+        div.className = 'flag-item' + (flag.startsWith('✅') ? ' safe-flag' : '');
+        div.style.animationDelay = (i * 0.05) + 's';
+        div.textContent = flag;
+        flagsContainer.appendChild(div);
+      });
+      breakdown.style.display = 'flex';
+      breakdown.className = 'url-breakdown' + (isSafe ? '' : ' danger-bg');
+    } else if (!isSafe) {
+      const div = document.createElement('div');
+      div.className = 'flag-item';
+      div.textContent = '🔴 Suspicious pixel pattern detected by ML model';
+      flagsContainer.appendChild(div);
+      breakdown.style.display = 'flex';
+      breakdown.className = 'url-breakdown danger-bg';
+    } else {
+      breakdown.style.display = 'none';
+    }
+
+    if (data.pixel_prob !== undefined) {
+      pixelText.textContent = data.pixel_prob + '%';
+    }
+
+    resultCard.className = 'result-card show ' + (isSafe ? 'safe' : 'danger');
+    statusText.textContent = isSafe ? 'QR code is safe ✓' : '⚠ Threat detected!';
+    statusDot.className    = 'dot ' + (isSafe ? 'active' : 'danger');
+    document.getElementById('scan-line').style.display = 'none';
+  }
+
+  function resetScan() {
+    scanning    = true;
+    lastScanned = '';
+    resultCard.className = 'result-card';
+    document.getElementById('heatmap-section').style.display = 'none';
+    document.getElementById('heatmap-img').src = '';
+    document.getElementById('url-breakdown').style.display = 'none';
+    document.getElementById('breakdown-flags').innerHTML = '';
+    statusText.textContent = 'Scanning for QR code...';
+    statusDot.className    = 'dot active';
+    document.getElementById('scan-line').style.display = 'block';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    requestAnimationFrame(tick);
+  }
+
+  startCamera();
+</script>
+</body>
+</html>

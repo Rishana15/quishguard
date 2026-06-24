@@ -1,0 +1,10 @@
+.venv
+dataset
+qr_codes_29.pickle
+qr_codes_29_labels.pickle
+QuishingDataset.zip
+train_model.py
+SETUP.md
+__pycache__
+*.pyc
+.git
